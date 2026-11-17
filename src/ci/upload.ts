@@ -27,11 +27,13 @@ export interface UploadOptions {
 export interface Uploaded {
   /** Where the platform keeps the bundle. */
   readonly key: string;
+  /** The bundle's SHA-256, in lowercase hex, which a release names it by. */
+  readonly sha256: string;
   /** `already-there` when the platform holds this very bundle from an earlier upload. */
   readonly outcome: "uploaded" | "already-there";
 }
 
-const API_TIMEOUT_MS = 30_000;
+export const API_TIMEOUT_MS = 30_000;
 const UPLOAD_TIMEOUT_MS = 240_000;
 
 export async function uploadBundle(
@@ -54,10 +56,12 @@ export async function uploadBundle(
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   const key = `${options.domain}/bundle/${sha256}.zip`;
-  if (response.ok) return { key, outcome: "uploaded" };
+  if (response.ok) return { key, sha256, outcome: "uploaded" };
   // S3 was told to write only where there is no object. The key is the bundle's hash, so what
   // is there is this bundle.
-  if (response.status === 412) return { key, outcome: "already-there" };
+  if (response.status === 412) {
+    return { key, sha256, outcome: "already-there" };
+  }
   // S3's answer can repeat what was signed, so only its error code is passed on.
   const code = /<Code>([A-Za-z0-9]+)<\/Code>/.exec(await response.text())?.[1];
   throw new Error(
@@ -65,7 +69,7 @@ export async function uploadBundle(
   );
 }
 
-async function jobToken(
+export async function jobToken(
   send: typeof fetch,
   options: UploadOptions,
 ): Promise<string> {
@@ -135,7 +139,7 @@ async function askWhereToUpload(
 }
 
 // The API's own words for why, and its ID for the request, which finds the platform's logs of it.
-async function refusal(response: Response): Promise<string> {
+export async function refusal(response: Response): Promise<string> {
   let message: unknown;
   try {
     message = field(await response.json(), "message");
@@ -150,7 +154,7 @@ async function refusal(response: Response): Promise<string> {
   ].join("");
 }
 
-function field(value: unknown, name: string): unknown {
+export function field(value: unknown, name: string): unknown {
   if (typeof value !== "object" || value === null) return undefined;
   return Object.hasOwn(value, name)
     ? (value as Record<string, unknown>)[name]
@@ -166,6 +170,6 @@ function isStrings(value: unknown): value is Record<string, string> {
   );
 }
 
-function sha256Hex(value: Buffer | string): string {
+export function sha256Hex(value: Buffer | string): string {
   return createHash("sha256").update(value).digest("hex");
 }

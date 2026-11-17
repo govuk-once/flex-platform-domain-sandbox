@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "build": "tsx src/build/bundle.ts",
-    "upload": "tsx src/ci/main.ts",
+    "release": "tsx src/ci/main.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

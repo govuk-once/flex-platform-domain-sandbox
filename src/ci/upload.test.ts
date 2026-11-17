@@ -148,6 +148,7 @@ describe("uploadBundle", () => {
     });
     expect(uploaded).toEqual({
       key: `example/bundle/${BUNDLE_SHA256}.zip`,
+      sha256: BUNDLE_SHA256,
       outcome: "uploaded",
     });
   });

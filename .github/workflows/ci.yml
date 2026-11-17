@@ -57,15 +57,16 @@ jobs:
       - name: Build the bundle
         run: pnpm run build
 
-  upload:
-    name: Upload to development
+  release:
+    name: Release to development
     needs: checks
-    # Never for a pull request: only what is on main is uploaded.
+    # Never for a pull request: only what is on main is released.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The platform takes an upload only from a job in the GitHub environment named for its own.
-    # GitHub puts the name in the job's token once this environment's protection rules pass.
+    # The platform takes an upload or a release only from a job in the GitHub environment named
+    # for its own. GitHub puts the name in the job's token once this environment's protection
+    # rules pass.
     environment: development
     permissions:
       contents: read
@@ -94,5 +95,5 @@ jobs:
       - name: Build the bundle
         run: pnpm run build
 
-      - name: Upload the bundle
-        run: pnpm run upload
+      - name: Upload and release the bundle
+        run: pnpm run release
