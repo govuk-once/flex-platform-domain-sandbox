@@ -1,0 +1,9 @@
+# One package. This file holds pnpm's settings, as the platform's does.
+allowBuilds:
+  esbuild: true
+
+savePrefix: ""
+
+# A release must be a week old before it is installed.
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
