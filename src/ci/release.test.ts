@@ -11,7 +11,10 @@ const TOKEN_REQUEST_URL = "https://actions.example/token?api-version=2.0";
 const REQUEST_TOKEN = "SYNTHETIC_REQUEST_TOKEN";
 const JOB_TOKEN = "SYNTHETIC_JOB_TOKEN";
 
+const VERSION = "1.4.2";
 const SHA256 = createHash("sha256").update("a bundle").digest("hex");
+const ASKED = { version: VERSION, sha256: SHA256 };
+const RELEASE_ID = "0193a1b2-c3d4-7e5f-8a6b-0123456789ab";
 
 interface Sent {
   readonly url: string;
@@ -65,13 +68,21 @@ function options(fake: typeof fetch): UploadOptions {
 
 const TOKEN_ISSUED = () => json(200, { value: JOB_TOKEN });
 const QUEUED = () =>
-  json(202, { environment: "development", domain: "example", sha256: SHA256 });
+  json(202, {
+    releaseId: RELEASE_ID,
+    environment: "development",
+    domain: "example",
+    version: VERSION,
+    sha256: SHA256,
+  });
 
 describe("releaseBundle", () => {
-  it("asks the API to release the bundle by its hash, with the token and the body's own hash", async () => {
+  it("asks the API to release the bundle by its version, with the token and the body's own hash", async () => {
     const { fetch, sent } = network([TOKEN_ISSUED(), QUEUED()]);
 
-    await releaseBundle(SHA256, options(fetch));
+    const releaseId = await releaseBundle(ASKED, options(fetch));
+
+    expect(releaseId).toBe(RELEASE_ID);
 
     expect(sent[0]?.url).toBe(
       `${TOKEN_REQUEST_URL}&audience=${encodeURIComponent(API)}`,
@@ -82,7 +93,7 @@ describe("releaseBundle", () => {
       `${API}/environments/development/domains/example/releases`,
     );
     expect(asked.method).toBe("POST");
-    expect(JSON.parse(asked.body)).toEqual({ sha256: SHA256 });
+    expect(JSON.parse(asked.body)).toEqual({ version: VERSION });
     expect(asked.headers).toEqual({
       "content-type": "application/json",
       "x-flex-ci-token": JOB_TOKEN,
@@ -100,16 +111,16 @@ describe("releaseBundle", () => {
       json(
         409,
         {
-          message: "No bundle with this hash has been uploaded",
+          message: "No bundle with this version has been uploaded",
           type: "client_error",
         },
         { "x-correlation-id": "1-00000000-000000000000000000000000" },
       ),
     ]);
 
-    await expect(releaseBundle(SHA256, options(fetch))).rejects.toMatchObject({
+    await expect(releaseBundle(ASKED, options(fetch))).rejects.toMatchObject({
       message:
-        "The pipeline API answered 409: No bundle with this hash has been uploaded (request 1-00000000-000000000000000000000000)",
+        "The pipeline API answered 409: No bundle with this version has been uploaded (request 1-00000000-000000000000000000000000)",
     });
   });
 
@@ -117,20 +128,36 @@ describe("releaseBundle", () => {
   it("fails on a 200, which the API never answers a release with", async () => {
     const { fetch } = network([TOKEN_ISSUED(), json(200, { sha256: SHA256 })]);
 
-    await expect(releaseBundle(SHA256, options(fetch))).rejects.toThrow(
+    await expect(releaseBundle(ASKED, options(fetch))).rejects.toThrow(
       "The pipeline API answered 200",
     );
   });
 
-  it("fails when the API queued another bundle", async () => {
-    const { fetch } = network([
-      TOKEN_ISSUED(),
-      json(202, { sha256: "0".repeat(64) }),
-    ]);
+  it("fails when the API queued another bundle or version", async () => {
+    for (const answer of [
+      { releaseId: RELEASE_ID, version: VERSION, sha256: "0".repeat(64) },
+      { releaseId: RELEASE_ID, version: "1.4.3", sha256: SHA256 },
+    ]) {
+      const { fetch } = network([TOKEN_ISSUED(), json(202, answer)]);
 
-    await expect(releaseBundle(SHA256, options(fetch))).rejects.toThrow(
-      "another bundle",
-    );
+      await expect(releaseBundle(ASKED, options(fetch))).rejects.toThrow(
+        "another bundle",
+      );
+    }
+  });
+
+  // The ID goes into the address the status is asked at.
+  it("fails when the answer's release ID is not one", async () => {
+    for (const releaseId of [undefined, "", "../uploads", `${RELEASE_ID}/x`]) {
+      const { fetch } = network([
+        TOKEN_ISSUED(),
+        json(202, { releaseId, version: VERSION, sha256: SHA256 }),
+      ]);
+
+      await expect(releaseBundle(ASKED, options(fetch))).rejects.toThrow(
+        "The pipeline API's answer held no release ID",
+      );
+    }
   });
 
   it("never puts the token in an error", async () => {
@@ -139,7 +166,7 @@ describe("releaseBundle", () => {
       json(500, { message: "Internal server error" }),
     ]);
 
-    await expect(releaseBundle(SHA256, options(fetch))).rejects.toSatisfy(
+    await expect(releaseBundle(ASKED, options(fetch))).rejects.toSatisfy(
       (error) => error instanceof Error && !error.message.includes("SYNTHETIC"),
     );
   });
