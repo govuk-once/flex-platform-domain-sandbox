@@ -16,6 +16,7 @@ const UPLOAD_HEADERS = {
   "x-amz-checksum-sha256": "checksum",
 };
 
+const VERSION = "1.4.2";
 const BUNDLE = Buffer.from("a bundle");
 const BUNDLE_SHA256 = createHash("sha256").update(BUNDLE).digest("hex");
 
@@ -78,6 +79,7 @@ function options(fake: typeof fetch): UploadOptions {
 const TOKEN_ISSUED = () => json(200, { value: JOB_TOKEN });
 const UPLOAD_SIGNED = () =>
   json(200, {
+    uploaded: false,
     method: "PUT",
     url: UPLOAD_URL,
     headers: UPLOAD_HEADERS,
@@ -92,7 +94,7 @@ describe("uploadBundle", () => {
       new Response(null, { status: 200 }),
     ]);
 
-    await uploadBundle(BUNDLE, options(fetch));
+    await uploadBundle(BUNDLE, VERSION, options(fetch));
 
     expect(sent[0]?.url).toBe(
       `${TOKEN_REQUEST_URL}&audience=${encodeURIComponent(API)}`,
@@ -100,14 +102,14 @@ describe("uploadBundle", () => {
     expect(sent[0]?.headers.authorization).toBe(`Bearer ${REQUEST_TOKEN}`);
   });
 
-  it("tells the API the bundle's hash and size, with the token and the body's own hash", async () => {
+  it("tells the API the bundle's version, hash and size, with the token and the body's own hash", async () => {
     const { fetch, sent } = network([
       TOKEN_ISSUED(),
       UPLOAD_SIGNED(),
       new Response(null, { status: 200 }),
     ]);
 
-    await uploadBundle(BUNDLE, options(fetch));
+    await uploadBundle(BUNDLE, VERSION, options(fetch));
 
     const [, asked] = sent;
     assert(asked?.body !== undefined);
@@ -116,6 +118,7 @@ describe("uploadBundle", () => {
     );
     expect(asked.method).toBe("POST");
     expect(JSON.parse(asked.body)).toEqual({
+      version: VERSION,
       sha256: BUNDLE_SHA256,
       size: BUNDLE.length,
     });
@@ -137,7 +140,7 @@ describe("uploadBundle", () => {
       new Response(null, { status: 200 }),
     ]);
 
-    const uploaded = await uploadBundle(BUNDLE, options(fetch));
+    const uploaded = await uploadBundle(BUNDLE, VERSION, options(fetch));
 
     expect(sent[2]).toEqual({
       url: UPLOAD_URL,
@@ -148,9 +151,56 @@ describe("uploadBundle", () => {
     });
     expect(uploaded).toEqual({
       key: `example/bundle/${BUNDLE_SHA256}.zip`,
+      version: VERSION,
       sha256: BUNDLE_SHA256,
       outcome: "uploaded",
     });
+  });
+
+  it("sends S3 nothing when the API says it holds the bundle already", async () => {
+    const { fetch, sent } = network([
+      TOKEN_ISSUED(),
+      json(200, { version: VERSION, sha256: BUNDLE_SHA256, uploaded: true }),
+    ]);
+
+    const uploaded = await uploadBundle(BUNDLE, VERSION, options(fetch));
+
+    expect(uploaded).toEqual({
+      key: `example/bundle/${BUNDLE_SHA256}.zip`,
+      version: VERSION,
+      sha256: BUNDLE_SHA256,
+      outcome: "already-there",
+    });
+    expect(sent).toHaveLength(2);
+  });
+
+  it("refuses an answer that the API holds another bundle or version", async () => {
+    for (const answer of [
+      { version: VERSION, sha256: "0".repeat(64), uploaded: true },
+      { version: "1.4.3", sha256: BUNDLE_SHA256, uploaded: true },
+      { uploaded: true },
+    ]) {
+      const { fetch } = network([TOKEN_ISSUED(), json(200, answer)]);
+
+      await expect(
+        uploadBundle(BUNDLE, VERSION, options(fetch)),
+      ).rejects.toThrow("The pipeline API answered for another bundle");
+    }
+  });
+
+  it("fails when the version already names other code, with the API's reason", async () => {
+    const { fetch, sent } = network([
+      TOKEN_ISSUED(),
+      json(409, {
+        message: "This version is already a different bundle",
+        type: "client_error",
+      }),
+    ]);
+
+    await expect(uploadBundle(BUNDLE, VERSION, options(fetch))).rejects.toThrow(
+      "The pipeline API answered 409: This version is already a different bundle",
+    );
+    expect(sent).toHaveLength(2);
   });
 
   it("takes S3's 412 as done: the platform already holds this bundle", async () => {
@@ -162,7 +212,7 @@ describe("uploadBundle", () => {
       }),
     ]);
 
-    const uploaded = await uploadBundle(BUNDLE, options(fetch));
+    const uploaded = await uploadBundle(BUNDLE, VERSION, options(fetch));
 
     expect(uploaded.outcome).toBe("already-there");
   });
@@ -177,7 +227,9 @@ describe("uploadBundle", () => {
       ),
     ]);
 
-    await expect(uploadBundle(BUNDLE, options(fetch))).rejects.toMatchObject({
+    await expect(
+      uploadBundle(BUNDLE, VERSION, options(fetch)),
+    ).rejects.toMatchObject({
       message:
         "The pipeline API answered 403: Forbidden (request 1-00000000-000000000000000000000000)",
     });
@@ -190,7 +242,9 @@ describe("uploadBundle", () => {
       new Response("<html>Blocked</html>", { status: 403 }),
     ]);
 
-    await expect(uploadBundle(BUNDLE, options(fetch))).rejects.toMatchObject({
+    await expect(
+      uploadBundle(BUNDLE, VERSION, options(fetch)),
+    ).rejects.toMatchObject({
       message: "The pipeline API answered 403",
     });
   });
@@ -205,7 +259,9 @@ describe("uploadBundle", () => {
     ]) {
       const { fetch, sent } = network([TOKEN_ISSUED(), json(200, answer)]);
 
-      await expect(uploadBundle(BUNDLE, options(fetch))).rejects.toMatchObject({
+      await expect(
+        uploadBundle(BUNDLE, VERSION, options(fetch)),
+      ).rejects.toMatchObject({
         message: "The pipeline API's answer is not an upload to make",
       });
       expect(sent).toHaveLength(2);
@@ -222,7 +278,9 @@ describe("uploadBundle", () => {
       ),
     ]);
 
-    await expect(uploadBundle(BUNDLE, options(fetch))).rejects.toMatchObject({
+    await expect(
+      uploadBundle(BUNDLE, VERSION, options(fetch)),
+    ).rejects.toMatchObject({
       message: "S3 refused the bundle: 403 SignatureDoesNotMatch",
     });
   });
@@ -235,7 +293,9 @@ describe("uploadBundle", () => {
     ]) {
       const { fetch, sent } = network([answer]);
 
-      await expect(uploadBundle(BUNDLE, options(fetch))).rejects.toThrow();
+      await expect(
+        uploadBundle(BUNDLE, VERSION, options(fetch)),
+      ).rejects.toThrow();
       expect(sent).toHaveLength(1);
     }
   });
@@ -248,7 +308,9 @@ describe("uploadBundle", () => {
     for (const answers of failures) {
       const { fetch } = network(answers);
 
-      await expect(uploadBundle(BUNDLE, options(fetch))).rejects.toSatisfy(
+      await expect(
+        uploadBundle(BUNDLE, VERSION, options(fetch)),
+      ).rejects.toSatisfy(
         (error) =>
           error instanceof Error && !error.message.includes("SYNTHETIC"),
       );

@@ -63,7 +63,10 @@ jobs:
     # Never for a pull request: only what is on main is released.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The job waits for the release to be live, which takes seconds, or minutes the first time.
+    # The script stops waiting after 17 minutes and says how the release was, so this is never
+    # what ends it.
+    timeout-minutes: 20
     # The platform takes an upload or a release only from a job in the GitHub environment named
     # for its own. GitHub puts the name in the job's token once this environment's protection
     # rules pass.
@@ -95,5 +98,5 @@ jobs:
       - name: Build the bundle
         run: pnpm run build
 
-      - name: Upload and release the bundle
+      - name: Upload the bundle, release it and wait for it to be live
         run: pnpm run release

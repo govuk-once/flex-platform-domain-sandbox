@@ -2,9 +2,12 @@
 //
 // 1. GitHub, for a token that says which repository and environment this job runs in, made out
 //    to the API's address.
-// 2. The API, with that token and the bundle's hash and size. It answers with one request this
-//    job may make of S3.
-// 3. S3, with the bundle.
+// 2. The API, with that token and the bundle's version, hash and size. It answers that it holds
+//    the bundle already, or with one request this job may make of S3.
+// 3. S3, with the bundle, unless the platform holds it.
+//
+// Uploading the same version and bundle again is no failure: there is nothing to do, and the
+// answer says so. A version names one bundle for good, so the API refuses other bytes under it.
 //
 // The job holds no AWS credentials. Neither the token nor the address S3 is sent the bundle at
 // is ever printed: each lets its holder upload as this repository until it expires.
@@ -27,7 +30,9 @@ export interface UploadOptions {
 export interface Uploaded {
   /** Where the platform keeps the bundle. */
   readonly key: string;
-  /** The bundle's SHA-256, in lowercase hex, which a release names it by. */
+  /** The version the bundle was uploaded as, which a release names it by. */
+  readonly version: string;
+  /** The bundle's SHA-256, in lowercase hex. */
   readonly sha256: string;
   /** `already-there` when the platform holds this very bundle from an earlier upload. */
   readonly outcome: "uploaded" | "already-there";
@@ -38,15 +43,23 @@ const UPLOAD_TIMEOUT_MS = 240_000;
 
 export async function uploadBundle(
   bundle: Buffer,
+  version: string,
   options: UploadOptions,
 ): Promise<Uploaded> {
   const send = options.fetch ?? fetch;
   const token = await jobToken(send, options);
   const sha256 = sha256Hex(bundle);
+  const key = `${options.domain}/bundle/${sha256}.zip`;
   const upload = await askWhereToUpload(send, options, token, {
+    version,
     sha256,
     size: bundle.length,
   });
+  // The platform holds these bytes already, from an earlier run of this version or under another
+  // version with the same code, so there is nothing to send.
+  if (upload === "present") {
+    return { key, version, sha256, outcome: "already-there" };
+  }
 
   const response = await send(upload.url, {
     method: "PUT",
@@ -55,12 +68,11 @@ export async function uploadBundle(
     redirect: "error",
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
-  const key = `${options.domain}/bundle/${sha256}.zip`;
-  if (response.ok) return { key, sha256, outcome: "uploaded" };
+  if (response.ok) return { key, version, sha256, outcome: "uploaded" };
   // S3 was told to write only where there is no object. The key is the bundle's hash, so what
   // is there is this bundle.
   if (response.status === 412) {
-    return { key, sha256, outcome: "already-there" };
+    return { key, version, sha256, outcome: "already-there" };
   }
   // S3's answer can repeat what was signed, so only its error code is passed on.
   const code = /<Code>([A-Za-z0-9]+)<\/Code>/.exec(await response.text())?.[1];
@@ -99,8 +111,12 @@ async function askWhereToUpload(
   send: typeof fetch,
   options: UploadOptions,
   token: string,
-  description: { readonly sha256: string; readonly size: number },
-): Promise<SignedUpload> {
+  description: {
+    readonly version: string;
+    readonly sha256: string;
+    readonly size: number;
+  },
+): Promise<SignedUpload | "present"> {
   const body = JSON.stringify(description);
   const response = await send(
     `${options.api}/environments/${options.environment}/domains/${options.domain}/uploads`,
@@ -125,6 +141,15 @@ async function askWhereToUpload(
   }
 
   const answer: unknown = await response.json();
+  if (field(answer, "uploaded") === true) {
+    if (
+      field(answer, "version") !== description.version ||
+      field(answer, "sha256") !== description.sha256
+    ) {
+      throw new Error("The pipeline API answered for another bundle");
+    }
+    return "present";
+  }
   const url = field(answer, "url");
   const headers = field(answer, "headers");
   if (
