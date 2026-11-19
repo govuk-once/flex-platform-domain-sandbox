@@ -1,11 +1,34 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, assert, describe, expect, it } from "vitest";
 
+import { field } from "../ci/upload.ts";
+import { bundleVersion } from "../ci/version.ts";
 import { buildFunction, CODE_FILE, HANDLER } from "./build.ts";
+
+// The parts of API Gateway's REST proxy event the function reads, as the platform's API sends
+// it for `/app/example/hello`.
+const EVENT = {
+  resource: "/{proxy+}",
+  path: "/hello",
+  httpMethod: "GET",
+  headers: { accept: "application/json" },
+  multiValueHeaders: { accept: ["application/json"] },
+  queryStringParameters: null,
+  multiValueQueryStringParameters: null,
+  body: null,
+  isBase64Encoded: false,
+  requestContext: {
+    domainName: "example.development.domains.test",
+    httpMethod: "GET",
+    path: "/hello",
+    resourcePath: "/{proxy+}",
+    stage: "default",
+  },
+};
 
 const directories: string[] = [];
 
@@ -34,7 +57,7 @@ describe("buildFunction", () => {
 
     const script = `
       require("./index.js")
-        .handler({ httpMethod: "GET", path: "/hello" })
+        .handler(${JSON.stringify(EVENT)})
         .then((result) => process.stdout.write(JSON.stringify(result)));
     `;
     const stdout = execFileSync(process.execPath, ["-e", script], {
@@ -43,14 +66,18 @@ describe("buildFunction", () => {
     });
 
     const result: unknown = JSON.parse(stdout);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       statusCode: 200,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        message: "Hello from the example domain",
-        method: "GET",
-        path: "/hello",
-      }),
+      isBase64Encoded: false,
+      multiValueHeaders: { "content-type": ["application/json"] },
+    });
+    const body = field(result, "body");
+    assert(typeof body === "string", "the answer has no body");
+    expect(JSON.parse(body)).toEqual({
+      message: "Hello from the example domain",
+      version: bundleVersion(
+        readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+      ),
     });
   });
 });

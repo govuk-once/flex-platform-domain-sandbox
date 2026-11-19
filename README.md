@@ -22,8 +22,9 @@ function's bundle.
 
 | Path | What it holds |
 |---|---|
-| `src/function/handler.ts` | The function. It takes API Gateway's proxy event. |
-| `src/build/build.ts` | `buildFunction`, which bundles the function with esbuild into one `index.js`. |
+| `src/function/app.ts` | The function's routes, a Hono app: `GET /hello` and `GET /hello/<name>`, each answering with the version live. |
+| `src/function/handler.ts` | The function. Hono's Lambda adapter turns API Gateway's proxy event into a request for the app. |
+| `src/build/build.ts` | `buildFunction`, which bundles the function with esbuild into one `index.js`, with the version from `package.json` written in. |
 | `src/build/zip.ts` | Writes the zip, the same bytes for the same code. |
 | `src/build/bundle.ts` | `pnpm build`: writes `dist/bundle.zip`. |
 | `src/ci/version.ts` | Reads the bundle's version from `package.json`. |

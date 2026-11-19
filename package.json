@@ -1,6 +1,6 @@
 {
   "name": "flex-platform-domain-sandbox",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -10,6 +10,10 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/aws-lambda": "1.0.1",
+    "hono": "4.13.18"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
