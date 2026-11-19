@@ -1,25 +1,11 @@
 // The domain's function. The platform puts it behind an API Gateway REST API as a proxy
-// integration, so it takes that API's event and answers with a status, headers and a body.
+// integration, so it takes that API's event, which the adapter turns into a request for the app.
 
-export interface ProxyEvent {
-  readonly httpMethod: string;
-  readonly path: string;
-}
+import { handle } from "@hono/aws-lambda";
 
-export interface ProxyResult {
-  readonly statusCode: number;
-  readonly headers: Record<string, string>;
-  readonly body: string;
-}
+import { createApp } from "./app.ts";
 
-export function handler(event: ProxyEvent): Promise<ProxyResult> {
-  return Promise.resolve({
-    statusCode: 200,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      message: "Hello from the example domain",
-      method: event.httpMethod,
-      path: event.path,
-    }),
-  });
-}
+// Written in by the build, from `package.json`.
+declare const FLEX_EXAMPLE_VERSION: string;
+
+export const handler = handle(createApp(FLEX_EXAMPLE_VERSION));
