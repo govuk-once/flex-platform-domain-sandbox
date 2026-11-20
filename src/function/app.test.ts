@@ -30,6 +30,16 @@ describe("createApp", () => {
     });
   });
 
+  it("answers a ping, with its version", async () => {
+    const response = await createApp(VERSION).request("/ping");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      message: "pong",
+      version: VERSION,
+    });
+  });
+
   it.each([
     ["a path it has no route for", "GET", "/goodbye"],
     ["a method it has no route for", "POST", "/hello"],
