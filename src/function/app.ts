@@ -21,6 +21,8 @@ export function createApp(version: string): Hono {
     }),
   );
 
+  app.get("/ping", (c) => c.json({ message: "pong", version }));
+
   app.notFound((c) => c.json(NOT_FOUND, 404));
 
   // The error itself goes to the log, never to the caller.
